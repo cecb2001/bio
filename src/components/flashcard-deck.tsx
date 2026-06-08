@@ -246,17 +246,19 @@ function StudyView({
           className={`flex w-full flex-col ${flipped ? "items-start gap-4" : "min-h-48 items-center justify-center gap-4"}`}
         >
           {flipped ? (
-            <p className="whitespace-pre-line self-stretch text-left text-base leading-relaxed text-zinc-700 dark:text-zinc-200">
-              {card.back}
-            </p>
+            <>
+              <p className="whitespace-pre-line self-stretch text-left text-base leading-relaxed text-zinc-700 dark:text-zinc-200">
+                {card.back}
+              </p>
+              {card.image ? (
+                <CardImage src={card.image} alt={card.front} flipped />
+              ) : null}
+            </>
           ) : (
             <p className="self-center text-3xl font-semibold tracking-tight">
               {card.front}
             </p>
           )}
-          {card.image ? (
-            <CardImage src={card.image} alt={card.front} flipped={flipped} />
-          ) : null}
         </div>
         {!flipped && card.hint ? (
           <span className="absolute bottom-4 left-8 text-xs italic text-zinc-400">
