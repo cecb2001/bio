@@ -3,46 +3,58 @@
 import { useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { FlashcardDeck } from "@/components/flashcard-deck";
-import { pigAnatomyDeck } from "@/data/decks";
 import { useGroup } from "@/lib/groups";
+import { useTopic } from "@/lib/topics";
 
-export function HomeDeck() {
+export function HomeDeck({ topicId }: { topicId: string }) {
   const params = useSearchParams();
   const groupId = params.get("group");
-  const { group, hydrated } = useGroup(groupId);
+  const { topic, hydrated: topicHydrated } = useTopic(topicId);
+  const { group, hydrated: groupHydrated } = useGroup(groupId);
 
-  const { cards, title, description } = useMemo(() => {
-    if (!groupId) {
+  const resolved = useMemo(() => {
+    if (!topic) {
       return {
-        cards: pigAnatomyDeck.cards,
-        title: pigAnatomyDeck.title,
-        description: pigAnatomyDeck.description,
+        cards: [],
+        title: "Topic not found",
+        description: "It may have been deleted from this browser.",
       };
     }
-    if (!group) {
+    if (!groupId) {
+      return {
+        cards: topic.cards,
+        title: topic.name,
+        description: topic.description || `${topic.cards.length} cards`,
+      };
+    }
+    if (!group || group.topicId !== topic.id) {
       return {
         cards: [],
         title: "Group not found",
-        description: undefined as string | undefined,
+        description: "Pick another group, or study all cards in the topic.",
       };
     }
-    const byId = new Map(pigAnatomyDeck.cards.map((c) => [c.id, c]));
+    const byId = new Map(topic.cards.map((c) => [c.id, c]));
     const subset = group.cardIds
       .map((id) => byId.get(id))
-      .filter((c): c is (typeof pigAnatomyDeck.cards)[number] => Boolean(c));
+      .filter((c): c is (typeof topic.cards)[number] => Boolean(c));
     const missing = group.cardIds.length - subset.length;
     const desc =
       missing > 0
-        ? `${subset.length} cards · ${missing} missing (deck regenerated since save)`
-        : `${subset.length} cards · saved group`;
+        ? `${subset.length} cards · ${missing} missing (topic changed since save)`
+        : `${subset.length} cards · saved group in ${topic.name}`;
     return { cards: subset, title: group.name, description: desc };
-  }, [groupId, group]);
+  }, [topic, group, groupId]);
 
-  if (groupId && !hydrated) {
-    return <p className="text-sm text-zinc-500">Loading group…</p>;
+  if (!topicHydrated || (groupId && !groupHydrated)) {
+    return <p className="text-sm text-zinc-500">Loading…</p>;
   }
 
   return (
-    <FlashcardDeck cards={cards} title={title} description={description} />
+    <FlashcardDeck
+      cards={resolved.cards}
+      title={resolved.title}
+      description={resolved.description}
+    />
   );
 }

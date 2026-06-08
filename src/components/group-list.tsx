@@ -1,27 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { pigAnatomyDeck } from "@/data/decks";
-import { useGroups } from "@/lib/groups";
+import { useGroupsForTopic } from "@/lib/groups";
+import type { Topic } from "@/lib/topic-types";
 
-export function GroupList() {
-  const { groups, hydrated } = useGroups();
-  const totalCards = pigAnatomyDeck.cards.length;
+export function GroupList({ topic }: { topic: Topic }) {
+  const { groups, hydrated } = useGroupsForTopic(topic.id);
 
   if (!hydrated) {
-    return (
-      <p className="text-sm text-zinc-500">Loading saved groups…</p>
-    );
+    return <p className="text-sm text-zinc-500">Loading saved groups…</p>;
   }
 
   if (groups.length === 0) {
     return (
       <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center dark:border-zinc-700 dark:bg-zinc-900">
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          No groups yet. Create one to study a focused subset of the {totalCards} cards.
+          No groups yet in {topic.name}. Create one to study a focused subset
+          of the {topic.cards.length} cards.
         </p>
         <Link
-          href="/groups/new"
+          href={`/groups/new?topic=${encodeURIComponent(topic.id)}`}
           className="rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
           Create your first group
@@ -50,7 +48,7 @@ export function GroupList() {
             </div>
             <div className="flex shrink-0 gap-2">
               <Link
-                href={`/?group=${encodeURIComponent(g.id)}`}
+                href={`/?topic=${encodeURIComponent(topic.id)}&group=${encodeURIComponent(g.id)}`}
                 className="rounded-full bg-zinc-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
               >
                 Study

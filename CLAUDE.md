@@ -6,9 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-`bio` is a personal study app for fetal pig dissection. The single-page UI is a flashcard deck (study + quiz modes) backed by an in-memory dataset of anatomy terms; a `/materials` route links to the source PDF served from `public/`.
+`bio` is a personal study app for fetal pig dissection (and, soon, any topic the user uploads). The data model is a three-level hierarchy: **Topic → Group → Card**.
 
-The PDF source material lives at `public/study-materials/pig-dissection.pdf` and is the authority for any new card content. When asked to add or correct cards, treat the PDF as ground truth — do not invent anatomy.
+- A **topic** owns a set of cards. The **Pig Dissection** topic is "builtin" — generated from `public/study-materials/pig-dissection.pdf` by `scripts/parse-pdf.py` and shipped in `src/data/decks.ts`.
+- User-created topics live in `localStorage` (no backend) and currently come from pasted text term/definition pairs. PDF upload with images is the next planned step (see PHASE 2 below).
+- A **group** is a saved subset of one topic's cards. Groups are also localStorage-only and reference cards by id within a single topic.
+
+The pig dissection PDF source material is the authority for any new card content in that topic. When asked to add or correct pig-anatomy cards, treat the PDF as ground truth — do not invent anatomy.
 
 ## Stack
 
@@ -41,28 +45,44 @@ There is no test runner configured. If you add tests, prefer Vitest + Testing Li
 src/
 ├── app/
 │   ├── layout.tsx                # Root layout, fonts, metadata
-│   ├── page.tsx                  # Home — picker + active deck
+│   ├── page.tsx                  # Home — topic + group pickers, active deck
 │   ├── globals.css               # Tailwind v4 entry + theme tokens
+│   ├── topics/
+│   │   ├── page.tsx              # All topics list (builtin + user)
+│   │   └── new/page.tsx          # Create topic (paste term/definition lines)
 │   ├── groups/
-│   │   ├── page.tsx              # Saved groups list
-│   │   ├── new/page.tsx          # Create group
-│   │   └── [id]/page.tsx         # Edit/delete group
+│   │   ├── page.tsx              # Groups in active topic (?topic=)
+│   │   ├── new/page.tsx          # Create group in topic (?topic=)
+│   │   └── [id]/page.tsx         # Edit/delete group (topic resolved from group)
 │   └── materials/
 │       └── page.tsx              # Lists source PDFs from public/study-materials/
 ├── components/
 │   ├── flashcard-deck.tsx        # "use client" — study/quiz/shuffle UI; takes cards directly
 │   ├── group-editor.tsx          # Create/edit form: name + searchable card checkboxes
-│   ├── group-list.tsx            # Saved-group list rendering
-│   ├── group-picker.tsx          # Active-deck dropdown on home (drives ?group= param)
-│   └── home-deck.tsx             # Reads ?group= and resolves the deck for FlashcardDeck
+│   ├── group-list.tsx            # Saved-group list (topic-scoped)
+│   ├── group-picker.tsx          # Active-group dropdown (drives ?group= param)
+│   ├── home-deck.tsx             # Resolves topic + group from URL → FlashcardDeck
+│   ├── topic-creator.tsx         # Paste-TSV form (Phase 1 topic upload)
+│   ├── topic-list.tsx            # Topic management list
+│   └── topic-picker.tsx          # Active-topic dropdown (drives ?topic= param)
 ├── data/
-│   └── decks.ts                  # Generated; Card[] + pigAnatomyDeck (200 cards)
+│   └── decks.ts                  # Generated; pigAnatomyTopic (200 cards) + builtinTopics
 └── lib/
-    └── groups.ts                 # localStorage-backed group store + hooks
+    ├── topic-types.ts            # Card / Topic / Group types (shared)
+    ├── topics.ts                 # localStorage user-topic store + hooks
+    └── groups.ts                 # localStorage group store + hooks (topicId-scoped, key v2)
 public/
 └── study-materials/
-    └── pig-dissection.pdf        # Served at /study-materials/pig-dissection.pdf
+    ├── pig-dissection.pdf        # Source PDF
+    └── images/                   # Per-card images extracted from the PDF
 ```
+
+## Phase 2 (planned) — PDF upload
+
+User can upload a Quizlet-style PDF and have it parsed server-side into a new topic. Implementation will add:
+- `api/parse-pdf` Vercel Python function running PyMuPDF (no `pdftotext` dep — Vercel functions don't ship poppler)
+- Vercel Blob storage for per-card images (`BLOB_READ_WRITE_TOKEN` env var)
+- File-upload variant of `topic-creator.tsx` that posts to the function and stores the returned topic in localStorage
 
 ### Server vs. client boundary
 
@@ -83,16 +103,29 @@ If the deck is regenerated and a card id changes, groups silently drop the missi
 
 ### Data flow
 
-`src/data/decks.ts` is **generated** from `public/study-materials/pig-dissection.pdf` by `scripts/parse-pdf.py`. Do NOT hand-edit `decks.ts`; corrections belong in the PDF (or in the parser if the issue is structural). To regenerate:
+`src/data/decks.ts` is **generated** from `public/study-materials/pig-dissection.pdf` by `scripts/parse-pdf.py`, which writes one `Topic` literal (the builtin pig dissection topic). Do NOT hand-edit `decks.ts`; corrections belong in the PDF (or in the parser if the issue is structural). To regenerate:
 
 ```bash
 pdftotext -bbox-layout public/study-materials/pig-dissection.pdf /tmp/bbox.html
-python3 scripts/parse-pdf.py /tmp/bbox.html src/data/decks.ts
+python3 scripts/parse-pdf.py /tmp/bbox.html public/study-materials/pig-dissection.pdf src/data/decks.ts
 ```
 
-The parser uses `defusedxml` for safe XML parsing and works at the **word** level (not block level) — words are grouped into rows by y-coordinate and then split into term column / definition column by xMin (threshold = 185pt). This handles the two structural quirks in this Quizlet PDF: (a) 3-digit numbered cards collapse number+term into one block, and (b) wide terms like `tensor fascia lata` push individual words past the visual term column. If the PDF layout changes, expect to re-tune `DEF_COLUMN_X` in `scripts/parse-pdf.py`.
+The parser uses `defusedxml` for safe XML parsing of `pdftotext -bbox-layout` output, plus PyMuPDF for image extraction (deduped by xref) and image-to-card matching (image `yMin` falls between an entry's `yMin` and the next entry's `yMin`; spillover images at the top of a page belong to the last entry on the previous page). Text parsing works at the **word** level — words are grouped into rows by y-coordinate and split into term/definition columns by `xMin >= 185`. This handles two structural quirks in the Quizlet PDF: (a) 3-digit numbered cards collapse number+term into one block, and (b) wide terms like `tensor fascia lata` push individual words past the visual term column.
 
-To add a new deck from a *different* PDF: extend the parser to take a deck id/title via CLI args, or write a sibling script — don't manually author `decks.ts`.
+To add a new builtin topic from a *different* PDF: extend the parser to take a topic id/name via CLI args, or write a sibling script — don't manually author `decks.ts`. For *user-created* topics see "Topics & groups (localStorage)" below.
+
+### Topics & groups (localStorage)
+
+User-created topics live in `localStorage` under `bio:topics:v1`; groups under `bio:groups:v2`. The store modules (`src/lib/topics.ts`, `src/lib/groups.ts`) expose CRUD functions plus React hooks (`useTopics`, `useTopic`, `useGroups`, `useGroup`, `useGroupsForTopic`). Builtin topics are NOT stored — they come from `builtinTopics` in `src/data/decks.ts` and are merged into `useTopics()` results so the UI sees one combined list.
+
+URL contract:
+- Active topic: `?topic=<topicId>` on most pages (defaults to the first builtin topic when missing).
+- Active group: `?group=<groupId>` on the home page (scoped to the active topic).
+- Switching topic clears the group filter automatically.
+
+If the deck is regenerated and a card id changes, groups silently drop the missing ids — the home page shows "(N missing)" in the description so you notice.
+
+Storage keys are versioned (`v1`, `v2`). Bumping the version intentionally wipes earlier data (`groups:v1` is removed on first read of `groups:v2`).
 
 ## Conventions
 

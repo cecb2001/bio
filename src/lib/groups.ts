@@ -1,21 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Group } from "@/lib/topic-types";
 
-export type Group = {
-  id: string;
-  name: string;
-  cardIds: string[];
-  createdAt: number;
-  updatedAt: number;
-};
-
-const STORAGE_KEY = "bio:groups:v1";
+// v2 introduces topicId on every group. v1 (untyped) is wiped on first load.
+const STORAGE_KEY = "bio:groups:v2";
+const LEGACY_KEYS = ["bio:groups:v1"];
 const STORAGE_EVENT = "bio:groups:changed";
 
 function readGroups(): Group[] {
   if (typeof window === "undefined") return [];
   try {
+    for (const k of LEGACY_KEYS) {
+      if (window.localStorage.getItem(k)) {
+        window.localStorage.removeItem(k);
+      }
+    }
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
@@ -37,6 +37,7 @@ function isGroup(value: unknown): value is Group {
   const v = value as Record<string, unknown>;
   return (
     typeof v.id === "string" &&
+    typeof v.topicId === "string" &&
     typeof v.name === "string" &&
     Array.isArray(v.cardIds) &&
     v.cardIds.every((id) => typeof id === "string") &&
@@ -52,10 +53,15 @@ function generateId(): string {
   return `g_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
 }
 
-export function createGroup(name: string, cardIds: string[]): Group {
+export function createGroup(
+  topicId: string,
+  name: string,
+  cardIds: string[],
+): Group {
   const now = Date.now();
   const group: Group = {
     id: generateId(),
+    topicId,
     name: name.trim() || "Untitled group",
     cardIds: [...new Set(cardIds)],
     createdAt: now,
@@ -74,8 +80,12 @@ export function updateGroup(
   if (idx === -1) return null;
   const next: Group = {
     ...groups[idx],
-    ...(patch.name !== undefined ? { name: patch.name.trim() || groups[idx].name } : {}),
-    ...(patch.cardIds !== undefined ? { cardIds: [...new Set(patch.cardIds)] } : {}),
+    ...(patch.name !== undefined
+      ? { name: patch.name.trim() || groups[idx].name }
+      : {}),
+    ...(patch.cardIds !== undefined
+      ? { cardIds: [...new Set(patch.cardIds)] }
+      : {}),
     updatedAt: Date.now(),
   };
   groups[idx] = next;
@@ -91,7 +101,7 @@ export function getGroup(id: string): Group | null {
   return readGroups().find((g) => g.id === id) ?? null;
 }
 
-/** SSR-safe hook that subscribes to in-tab and cross-tab group changes. */
+/** SSR-safe hook for all groups across all topics. */
 export function useGroups(): { groups: Group[]; hydrated: boolean } {
   const [groups, setGroups] = useState<Group[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -99,7 +109,6 @@ export function useGroups(): { groups: Group[]; hydrated: boolean } {
   useEffect(() => {
     setGroups(readGroups());
     setHydrated(true);
-
     const sync = () => setGroups(readGroups());
     window.addEventListener(STORAGE_EVENT, sync);
     window.addEventListener("storage", sync);
@@ -112,7 +121,19 @@ export function useGroups(): { groups: Group[]; hydrated: boolean } {
   return { groups, hydrated };
 }
 
-/** Single-group hook for /groups/[id] pages. */
+/** Groups filtered to a specific topic. */
+export function useGroupsForTopic(topicId: string | null): {
+  groups: Group[];
+  hydrated: boolean;
+} {
+  const { groups, hydrated } = useGroups();
+  const filtered = useMemo(
+    () => (topicId ? groups.filter((g) => g.topicId === topicId) : []),
+    [groups, topicId],
+  );
+  return { groups: filtered, hydrated };
+}
+
 export function useGroup(id: string | null): {
   group: Group | null;
   hydrated: boolean;
@@ -121,22 +142,5 @@ export function useGroup(id: string | null): {
   return {
     group: id ? groups.find((g) => g.id === id) ?? null : null,
     hydrated,
-  };
-}
-
-/** Convenience for the active-group selector on the home page. */
-export function useActiveGroup(searchParamValue: string | null): {
-  group: Group | null;
-  hydrated: boolean;
-} {
-  return useGroup(searchParamValue);
-}
-
-/** Mutate operations that components can call without thinking about storage. */
-export function useGroupActions() {
-  return {
-    create: useCallback(createGroup, []),
-    update: useCallback(updateGroup, []),
-    remove: useCallback(deleteGroup, []),
   };
 }

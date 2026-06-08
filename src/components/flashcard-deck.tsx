@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
-import type { Card } from "@/data/decks";
+import type { Card } from "@/lib/topic-types";
 
 type Mode = "study" | "quiz";
 

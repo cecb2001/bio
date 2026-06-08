@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use } from "react";
 import { GroupEditor } from "@/components/group-editor";
 import { useGroup } from "@/lib/groups";
+import { useTopic } from "@/lib/topics";
 
 export default function EditGroupPage({
   params,
@@ -11,17 +12,19 @@ export default function EditGroupPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { group, hydrated } = useGroup(id);
+  const { group, hydrated: groupHydrated } = useGroup(id);
+  const { topic, hydrated: topicHydrated } = useTopic(group?.topicId ?? null);
+  const hydrated = groupHydrated && topicHydrated;
 
   return (
     <div className="flex flex-col flex-1 items-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex flex-1 w-full max-w-3xl flex-col gap-6 px-6 py-16 sm:px-10">
         {!hydrated ? (
           <p className="text-sm text-zinc-500">Loading…</p>
-        ) : !group ? (
+        ) : !group || !topic ? (
           <NotFound />
         ) : (
-          <GroupEditor mode={{ kind: "edit", group }} />
+          <GroupEditor mode={{ kind: "edit", topic, group }} />
         )}
       </main>
     </div>

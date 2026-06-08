@@ -3,18 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { pigAnatomyDeck } from "@/data/decks";
-import {
-  createGroup,
-  deleteGroup,
-  type Group,
-  updateGroup,
-} from "@/lib/groups";
+import { createGroup, deleteGroup, updateGroup } from "@/lib/groups";
+import type { Group, Topic } from "@/lib/topic-types";
 
-type Mode = { kind: "create" } | { kind: "edit"; group: Group };
+type Mode =
+  | { kind: "create"; topic: Topic }
+  | { kind: "edit"; topic: Topic; group: Group };
 
 export function GroupEditor({ mode }: { mode: Mode }) {
   const router = useRouter();
+  const topic = mode.topic;
   const initial = mode.kind === "edit" ? mode.group : null;
   const [name, setName] = useState(initial?.name ?? "");
   const [selected, setSelected] = useState<Set<string>>(
@@ -25,13 +23,13 @@ export function GroupEditor({ mode }: { mode: Mode }) {
 
   const filteredCards = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return pigAnatomyDeck.cards;
-    return pigAnatomyDeck.cards.filter(
+    if (!q) return topic.cards;
+    return topic.cards.filter(
       (c) =>
         c.front.toLowerCase().includes(q) ||
         c.back.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [query, topic.cards]);
 
   function handleRowClick(cardId: string, shiftKey: boolean) {
     const wasSelected = selected.has(cardId);
@@ -92,15 +90,19 @@ export function GroupEditor({ mode }: { mode: Mode }) {
       alert("Pick at least one card.");
       return;
     }
-    const cardIds = pigAnatomyDeck.cards
+    const cardIds = topic.cards
       .filter((c) => selected.has(c.id))
       .map((c) => c.id);
     if (mode.kind === "create") {
-      const g = createGroup(trimmed, cardIds);
-      router.push(`/?group=${encodeURIComponent(g.id)}`);
+      const g = createGroup(topic.id, trimmed, cardIds);
+      router.push(
+        `/?topic=${encodeURIComponent(topic.id)}&group=${encodeURIComponent(g.id)}`,
+      );
     } else {
       updateGroup(mode.group.id, { name: trimmed, cardIds });
-      router.push(`/?group=${encodeURIComponent(mode.group.id)}`);
+      router.push(
+        `/?topic=${encodeURIComponent(topic.id)}&group=${encodeURIComponent(mode.group.id)}`,
+      );
     }
   }
 
@@ -109,21 +111,24 @@ export function GroupEditor({ mode }: { mode: Mode }) {
     if (!confirm(`Delete group "${mode.group.name}"? This cannot be undone.`))
       return;
     deleteGroup(mode.group.id);
-    router.push("/groups");
+    router.push(`/groups?topic=${encodeURIComponent(topic.id)}`);
   }
 
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
         <Link
-          href="/groups"
+          href={`/groups?topic=${encodeURIComponent(topic.id)}`}
           className="self-start text-sm text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
         >
-          ← All groups
+          ← All groups in {topic.name}
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight">
           {mode.kind === "create" ? "New group" : "Edit group"}
         </h1>
+        <p className="text-xs uppercase tracking-widest text-zinc-500">
+          Topic: {topic.name}
+        </p>
       </header>
 
       <div className="flex flex-col gap-2">
@@ -146,7 +151,7 @@ export function GroupEditor({ mode }: { mode: Mode }) {
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs uppercase tracking-widest text-zinc-500">
-            {selected.size} of {pigAnatomyDeck.cards.length} cards selected
+            {selected.size} of {topic.cards.length} cards selected
           </p>
           <div className="flex gap-2 text-xs">
             <button
@@ -246,7 +251,7 @@ export function GroupEditor({ mode }: { mode: Mode }) {
         </div>
         <div className="flex gap-2">
           <Link
-            href="/groups"
+            href={`/groups?topic=${encodeURIComponent(topic.id)}`}
             className="rounded-full border border-zinc-200 px-5 py-2 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
           >
             Cancel
