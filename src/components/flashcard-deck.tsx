@@ -161,14 +161,16 @@ function StudyView({
         type="button"
         onClick={onFlip}
         aria-label={flipped ? "Show term" : "Show definition"}
-        className="group relative h-64 w-full rounded-2xl border border-zinc-200 bg-white p-8 text-left shadow-sm transition hover:border-zinc-300 hover:shadow dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
+        className="group relative min-h-64 w-full rounded-2xl border border-zinc-200 bg-white p-8 pt-12 text-left shadow-sm transition hover:border-zinc-300 hover:shadow dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
       >
         <span className="absolute right-4 top-4 text-xs uppercase tracking-widest text-zinc-400">
           {flipped ? "Definition" : "Term"} · click to flip
         </span>
-        <div className="flex h-full items-center justify-center text-center">
+        <div
+          className={`flex w-full ${flipped ? "items-start" : "min-h-48 items-center"} justify-center text-center`}
+        >
           {flipped ? (
-            <p className="text-lg leading-relaxed text-zinc-700 dark:text-zinc-200">
+            <p className="whitespace-pre-line text-left text-base leading-relaxed text-zinc-700 dark:text-zinc-200">
               {card.back}
             </p>
           ) : (
@@ -245,7 +247,7 @@ function QuizView({
           {state.current.front}
         </p>
         {revealed ? (
-          <p className="mt-6 border-t border-zinc-200 pt-4 leading-relaxed text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
+          <p className="mt-6 whitespace-pre-line border-t border-zinc-200 pt-4 leading-relaxed text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
             {state.current.back}
           </p>
         ) : null}

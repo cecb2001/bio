@@ -60,10 +60,16 @@ Pages under `src/app/**` are server components by default. State and event handl
 
 ### Data flow
 
-`src/data/decks.ts` is the single source of truth for flashcard content. The home page imports `pigAnatomyDeck` directly (no fetch, no DB). To add a new deck:
+`src/data/decks.ts` is **generated** from `public/study-materials/pig-dissection.pdf` by `scripts/parse-pdf.py`. Do NOT hand-edit `decks.ts`; corrections belong in the PDF (or in the parser if the issue is structural). To regenerate:
 
-1. Define a new `Deck` in `src/data/decks.ts` and append to the `decks` array.
-2. Either swap `<FlashcardDeck deck={...} />` on the home page, or add a deck-picker route. Don't introduce per-deck data files unless the deck is large enough to justify it.
+```bash
+pdftotext -bbox-layout public/study-materials/pig-dissection.pdf /tmp/bbox.html
+python3 scripts/parse-pdf.py /tmp/bbox.html src/data/decks.ts
+```
+
+The parser uses `defusedxml` for safe XML parsing and works at the **word** level (not block level) — words are grouped into rows by y-coordinate and then split into term column / definition column by xMin (threshold = 185pt). This handles the two structural quirks in this Quizlet PDF: (a) 3-digit numbered cards collapse number+term into one block, and (b) wide terms like `tensor fascia lata` push individual words past the visual term column. If the PDF layout changes, expect to re-tune `DEF_COLUMN_X` in `scripts/parse-pdf.py`.
+
+To add a new deck from a *different* PDF: extend the parser to take a deck id/title via CLI args, or write a sibling script — don't manually author `decks.ts`.
 
 ## Conventions
 
