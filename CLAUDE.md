@@ -40,23 +40,46 @@ There is no test runner configured. If you add tests, prefer Vitest + Testing Li
 ```
 src/
 ├── app/
-│   ├── layout.tsx          # Root layout, fonts, metadata
-│   ├── page.tsx            # Home — renders <FlashcardDeck deck={pigAnatomyDeck}>
-│   ├── globals.css         # Tailwind v4 entry + theme tokens
+│   ├── layout.tsx                # Root layout, fonts, metadata
+│   ├── page.tsx                  # Home — picker + active deck
+│   ├── globals.css               # Tailwind v4 entry + theme tokens
+│   ├── groups/
+│   │   ├── page.tsx              # Saved groups list
+│   │   ├── new/page.tsx          # Create group
+│   │   └── [id]/page.tsx         # Edit/delete group
 │   └── materials/
-│       └── page.tsx        # Lists source PDFs from public/study-materials/
+│       └── page.tsx              # Lists source PDFs from public/study-materials/
 ├── components/
-│   └── flashcard-deck.tsx  # "use client" — study/quiz modes, all interaction state
-└── data/
-    └── decks.ts            # Card[] / Deck[] + pigAnatomyDeck export
+│   ├── flashcard-deck.tsx        # "use client" — study/quiz/shuffle UI; takes cards directly
+│   ├── group-editor.tsx          # Create/edit form: name + searchable card checkboxes
+│   ├── group-list.tsx            # Saved-group list rendering
+│   ├── group-picker.tsx          # Active-deck dropdown on home (drives ?group= param)
+│   └── home-deck.tsx             # Reads ?group= and resolves the deck for FlashcardDeck
+├── data/
+│   └── decks.ts                  # Generated; Card[] + pigAnatomyDeck (200 cards)
+└── lib/
+    └── groups.ts                 # localStorage-backed group store + hooks
 public/
 └── study-materials/
-    └── pig-dissection.pdf  # Served at /study-materials/pig-dissection.pdf
+    └── pig-dissection.pdf        # Served at /study-materials/pig-dissection.pdf
 ```
 
 ### Server vs. client boundary
 
-Pages under `src/app/**` are server components by default. State and event handlers live in `src/components/flashcard-deck.tsx`, which is a client component (`"use client"` at top). When adding interactivity, prefer extending the existing client component over converting a page — keep page components as thin servers that hand props down.
+Pages under `src/app/**` are server components by default; interactive logic lives in client components under `src/components/`. The home page (`src/app/page.tsx`) is a server component that wraps client components (`GroupPicker`, `HomeDeck`) in `<Suspense>` boundaries — required because they call `useSearchParams`, which forces the page out of static generation otherwise. When adding interactivity, extend an existing client component rather than converting a page.
+
+### Groups (localStorage)
+
+Saved card groups live in `localStorage` under the key `bio:groups:v1`. There is no backend, no auth, no sync across devices. The store is encapsulated in `src/lib/groups.ts`:
+
+- `Group = { id, name, cardIds: string[], createdAt, updatedAt }`
+- CRUD: `createGroup`, `updateGroup`, `deleteGroup`, `getGroup`
+- React hooks: `useGroups()` (all), `useGroup(id)` (single) — both SSR-safe (return empty / null until hydrated)
+- Cross-tab sync: writes dispatch a `bio:groups:changed` event AND the native `storage` event fires for other tabs; both hooks listen to both.
+
+The active group on the home page is selected via the `?group=<id>` URL search param, kept in URL for back/forward and link sharing within the same browser. If the group id is unknown (e.g. cleared cache), `HomeDeck` shows a "group not found" empty state.
+
+If the deck is regenerated and a card id changes, groups silently drop the missing ids — `HomeDeck` shows "(N missing)" in the description so you notice.
 
 ### Data flow
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { Card, Deck } from "@/data/decks";
+import { useEffect, useMemo, useState } from "react";
+import type { Card } from "@/data/decks";
 
 type Mode = "study" | "quiz";
 
@@ -31,30 +31,64 @@ function buildQuizState(cards: readonly Card[]): QuizState {
   };
 }
 
-export function FlashcardDeck({ deck }: { deck: Deck }) {
+export function FlashcardDeck({
+  cards,
+  title,
+  description,
+}: {
+  cards: Card[];
+  title: string;
+  description?: string;
+}) {
+  const total = cards.length;
   const [mode, setMode] = useState<Mode>("study");
+  const [studyOrder, setStudyOrder] = useState<Card[]>(cards);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [quiz, setQuiz] = useState<QuizState>(() => buildQuizState(deck.cards));
+  const [quiz, setQuiz] = useState<QuizState>(() => buildQuizState(cards));
   const [revealed, setRevealed] = useState(false);
 
-  const card = deck.cards[index];
-  const total = deck.cards.length;
+  // Reset when the deck changes (e.g. user switches groups).
+  useEffect(() => {
+    setStudyOrder(cards);
+    setIndex(0);
+    setFlipped(false);
+    setQuiz(buildQuizState(cards));
+    setRevealed(false);
+  }, [cards]);
+
+  const card = studyOrder[index];
 
   const progressLabel = useMemo(() => {
-    if (mode === "study") return `Card ${index + 1} of ${total}`;
-    if (!quiz.current) return `Quiz complete — ${quiz.correct}/${quiz.attempted}`;
+    if (mode === "study")
+      return total === 0 ? "0 cards" : `Card ${index + 1} of ${total}`;
+    if (!quiz.current)
+      return `Quiz complete — ${quiz.correct}/${quiz.attempted}`;
     return `Quiz: ${quiz.attempted + 1} of ${total} · score ${quiz.correct}/${quiz.attempted}`;
   }, [mode, index, total, quiz]);
 
   function next() {
+    if (total === 0) return;
     setFlipped(false);
     setIndex((i) => (i + 1) % total);
   }
 
   function prev() {
+    if (total === 0) return;
     setFlipped(false);
     setIndex((i) => (i - 1 + total) % total);
+  }
+
+  function shuffleStudy() {
+    setStudyOrder(shuffle(studyOrder));
+    setIndex(0);
+    setFlipped(false);
+  }
+
+  function resetStudyOrder() {
+    setStudyOrder(cards);
+    setIndex(0);
+    setFlipped(false);
   }
 
   function answer(correct: boolean) {
@@ -73,18 +107,38 @@ export function FlashcardDeck({ deck }: { deck: Deck }) {
   }
 
   function restartQuiz() {
-    setQuiz(buildQuizState(deck.cards));
+    setQuiz(buildQuizState(cards));
     setRevealed(false);
+  }
+
+  if (total === 0) {
+    return (
+      <section className="w-full max-w-2xl flex flex-col gap-6">
+        <header>
+          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          {description ? (
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              {description}
+            </p>
+          ) : null}
+        </header>
+        <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
+          This group has no cards yet. Edit the group to add some.
+        </div>
+      </section>
+    );
   }
 
   return (
     <section className="w-full max-w-2xl flex flex-col gap-6">
-      <header className="flex items-center justify-between gap-4">
+      <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{deck.title}</h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            {deck.description}
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          {description ? (
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              {description}
+            </p>
+          ) : null}
         </div>
         <div className="flex rounded-full border border-zinc-200 bg-white p-1 text-sm dark:border-zinc-800 dark:bg-zinc-900">
           <button
@@ -115,9 +169,29 @@ export function FlashcardDeck({ deck }: { deck: Deck }) {
         </div>
       </header>
 
-      <p className="text-xs uppercase tracking-widest text-zinc-500">
-        {progressLabel}
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-widest text-zinc-500">
+          {progressLabel}
+        </p>
+        {mode === "study" ? (
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={shuffleStudy}
+              className="rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+            >
+              Shuffle
+            </button>
+            <button
+              type="button"
+              onClick={resetStudyOrder}
+              className="rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+            >
+              Reset order
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       {mode === "study" && card ? (
         <StudyView
