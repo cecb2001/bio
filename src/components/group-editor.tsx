@@ -188,30 +188,43 @@ export function GroupEditor({ mode }: { mode: Mode }) {
                   key={card.id}
                   className="border-b border-zinc-100 last:border-b-0 dark:border-zinc-800"
                 >
-                  <label
-                    className="flex cursor-pointer items-start gap-3 p-3 select-none hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleRowClick(card.id, e.shiftKey);
-                    }}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={checked}
+                    aria-label={`Select ${card.front}`}
+                    onClick={(e) => handleRowClick(card.id, e.shiftKey)}
+                    className="flex w-full cursor-pointer items-start gap-3 p-3 text-left select-none hover:bg-zinc-50 focus:outline-none focus-visible:bg-zinc-100 dark:hover:bg-zinc-800/50 dark:focus-visible:bg-zinc-800"
                   >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        /* handled by label onClick */
-                      }}
-                      tabIndex={-1}
-                      aria-label={`Select ${card.front}`}
-                      className="mt-1 h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
-                    />
+                    <span
+                      aria-hidden="true"
+                      className={`mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                        checked
+                          ? "border-zinc-900 bg-zinc-900 dark:border-zinc-100 dark:bg-zinc-100"
+                          : "border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+                      }`}
+                    >
+                      {checked ? (
+                        <svg
+                          viewBox="0 0 16 16"
+                          className="h-3 w-3 text-white dark:text-zinc-900"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M3 8.5l3 3 7-7" />
+                        </svg>
+                      ) : null}
+                    </span>
                     <div className="min-w-0 flex-1">
                       <p className="font-medium">{card.front}</p>
                       <p className="line-clamp-2 text-sm text-zinc-600 dark:text-zinc-400">
                         {card.back.replace(/\n/g, " · ")}
                       </p>
                     </div>
-                  </label>
+                  </button>
                 </li>
               );
             })
