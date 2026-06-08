@@ -42,6 +42,7 @@ export function FlashcardDeck({
 }) {
   const total = cards.length;
   const [mode, setMode] = useState<Mode>("study");
+  const [shuffleOn, setShuffleOn] = useState(false);
   const [studyOrder, setStudyOrder] = useState<Card[]>(cards);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -50,12 +51,12 @@ export function FlashcardDeck({
 
   // Reset when the deck changes (e.g. user switches groups).
   useEffect(() => {
-    setStudyOrder(cards);
+    setStudyOrder(shuffleOn ? shuffle(cards) : cards);
     setIndex(0);
     setFlipped(false);
     setQuiz(buildQuizState(cards));
     setRevealed(false);
-  }, [cards]);
+  }, [cards, shuffleOn]);
 
   const card = studyOrder[index];
 
@@ -79,14 +80,8 @@ export function FlashcardDeck({
     setIndex((i) => (i - 1 + total) % total);
   }
 
-  function shuffleStudy() {
-    setStudyOrder(shuffle(studyOrder));
-    setIndex(0);
-    setFlipped(false);
-  }
-
-  function resetStudyOrder() {
-    setStudyOrder(cards);
+  function reshuffleNow() {
+    setStudyOrder(shuffle(cards));
     setIndex(0);
     setFlipped(false);
   }
@@ -169,26 +164,32 @@ export function FlashcardDeck({
         </div>
       </header>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-xs uppercase tracking-widest text-zinc-500">
           {progressLabel}
         </p>
         {mode === "study" ? (
-          <div className="flex items-center gap-2 text-xs">
-            <button
-              type="button"
-              onClick={shuffleStudy}
-              className="rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-            >
-              Shuffle
-            </button>
-            <button
-              type="button"
-              onClick={resetStudyOrder}
-              className="rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-            >
-              Reset order
-            </button>
+          <div className="flex items-center gap-3 text-xs">
+            <label className="flex cursor-pointer items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={shuffleOn}
+                onChange={(e) => setShuffleOn(e.target.checked)}
+                className="h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
+              />
+              <span className="uppercase tracking-widest text-zinc-500">
+                Shuffle
+              </span>
+            </label>
+            {shuffleOn ? (
+              <button
+                type="button"
+                onClick={reshuffleNow}
+                className="rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+              >
+                Reshuffle
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
