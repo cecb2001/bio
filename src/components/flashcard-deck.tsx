@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import type { Card } from "@/data/decks";
 
@@ -242,15 +243,20 @@ function StudyView({
           {flipped ? "Definition" : "Term"} · click to flip
         </span>
         <div
-          className={`flex w-full ${flipped ? "items-start" : "min-h-48 items-center"} justify-center text-center`}
+          className={`flex w-full flex-col ${flipped ? "items-start gap-4" : "min-h-48 items-center justify-center gap-4"}`}
         >
           {flipped ? (
-            <p className="whitespace-pre-line text-left text-base leading-relaxed text-zinc-700 dark:text-zinc-200">
+            <p className="whitespace-pre-line self-stretch text-left text-base leading-relaxed text-zinc-700 dark:text-zinc-200">
               {card.back}
             </p>
           ) : (
-            <p className="text-3xl font-semibold tracking-tight">{card.front}</p>
+            <p className="self-center text-3xl font-semibold tracking-tight">
+              {card.front}
+            </p>
           )}
+          {card.image ? (
+            <CardImage src={card.image} alt={card.front} flipped={flipped} />
+          ) : null}
         </div>
         {!flipped && card.hint ? (
           <span className="absolute bottom-4 left-8 text-xs italic text-zinc-400">
@@ -322,9 +328,20 @@ function QuizView({
           {state.current.front}
         </p>
         {revealed ? (
-          <p className="mt-6 whitespace-pre-line border-t border-zinc-200 pt-4 leading-relaxed text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
-            {state.current.back}
-          </p>
+          <>
+            <p className="mt-6 whitespace-pre-line border-t border-zinc-200 pt-4 leading-relaxed text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
+              {state.current.back}
+            </p>
+            {state.current.image ? (
+              <div className="mt-4">
+                <CardImage
+                  src={state.current.image}
+                  alt={state.current.front}
+                  flipped
+                />
+              </div>
+            ) : null}
+          </>
         ) : null}
       </div>
 
@@ -354,6 +371,32 @@ function QuizView({
           Reveal answer
         </button>
       )}
+    </div>
+  );
+}
+
+function CardImage({
+  src,
+  alt,
+  flipped,
+}: {
+  src: string;
+  alt: string;
+  flipped: boolean;
+}) {
+  return (
+    <div
+      className={`flex w-full justify-center ${flipped ? "" : "max-w-md"}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Image
+        src={src}
+        alt={alt}
+        width={500}
+        height={500}
+        className="h-auto max-h-72 w-auto rounded-lg border border-zinc-200 bg-white object-contain dark:border-zinc-800 dark:bg-zinc-100"
+        unoptimized
+      />
     </div>
   );
 }

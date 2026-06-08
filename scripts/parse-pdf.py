@@ -1,41 +1,45 @@
 #!/usr/bin/env python3
-"""Parse the fetal-pig dissection Quizlet PDF into flashcard term/definition pairs.
+"""Parse the fetal-pig dissection Quizlet PDF into flashcard term/definition
+pairs and extract per-card images.
 
-The PDF visually lays out three columns per entry: number (~x=20), term
-(~x=54), definition (~x=189+). pdftotext sometimes merges term+definition
-into a single block when the term wraps; to handle that uniformly, this
-script works at the word level (each word has its own bbox), groups words
-into rows by y-coordinate, then splits each row into term-column and
-definition-column words by xMin.
+Text extraction uses pdftotext bbox-layout (word level + column split by
+xMin); image extraction uses PyMuPDF for xref → file + per-placement bbox.
+A card is associated with an image whose top edge sits between the card's
+yMin and the next card's yMin on the same page (or, for an image that
+appears above the first card on a page, the last card on the previous page).
 
 Usage:
     pdftotext -bbox-layout public/study-materials/pig-dissection.pdf out.html
-    python3 scripts/parse-pdf.py out.html src/data/decks.ts
+    python3 scripts/parse-pdf.py out.html public/study-materials/pig-dissection.pdf src/data/decks.ts
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import defusedxml.ElementTree as ET
+import pymupdf
 
 NS = {"x": "http://www.w3.org/1999/xhtml"}
 
-# A word with xMin below this is in the term column; at or above is the
-# definition column. The PDF's natural definition column starts at xMin=189.035.
-# We pick a threshold just below it so wide term words (e.g. "lata" at x≈154)
-# stay on the term side.
+# Word in the term column has xMin < this; otherwise definition column.
 DEF_COLUMN_X = 185.0
-# Rows whose words share approximately the same yMin (1pt tolerance).
+# Words within 1pt of the same yMin are the same row.
 ROW_TOL = 1.0
-# Header/footer text we always drop.
+# Page header / footer text we always drop.
 HEADER_PATTERNS = [
     re.compile(r"^pig dissection 2026$", re.I),
     re.compile(r"^Study online at", re.I),
     re.compile(r"^\d+\s*/\s*\d+$"),
 ]
+# Watermark logo size: 38pt square in the top-left corner of every page.
+WATERMARK_MAX_DIM = 60.0
+# Where extracted images are written, served from /study-materials/images/.
+IMAGE_OUT_DIR = "public/study-materials/images"
+IMAGE_URL_PREFIX = "/study-materials/images"
 
 
 @dataclass(frozen=True)
@@ -52,13 +56,19 @@ class Row:
     y_min: float
     words: list[Word]
 
-    def text(self, *, term_only: bool = False, def_only: bool = False) -> str:
+    def text(self) -> str:
         ws = sorted(self.words, key=lambda w: w.x_min)
-        if term_only:
-            ws = [w for w in ws if w.x_min < DEF_COLUMN_X]
-        elif def_only:
-            ws = [w for w in ws if w.x_min >= DEF_COLUMN_X]
         return " ".join(w.text for w in ws).strip()
+
+
+@dataclass
+class Entry:
+    number: int
+    page: int
+    y_min: float
+    term_lines: list[str] = field(default_factory=list)
+    def_lines: list[str] = field(default_factory=list)
+    image_url: str | None = None
 
 
 def _is_header_row(row: Row) -> bool:
@@ -89,11 +99,11 @@ def collect_words(xhtml_path: str) -> list[Word]:
 
 
 def group_rows(words: list[Word]) -> list[Row]:
-    """Cluster words into rows: same page + similar yMin (within ROW_TOL)."""
-    rows: list[Row] = []
     by_page: dict[int, list[Word]] = {}
     for w in words:
         by_page.setdefault(w.page, []).append(w)
+
+    rows: list[Row] = []
     for page in sorted(by_page):
         page_words = sorted(by_page[page], key=lambda w: w.y_min)
         current: Row | None = None
@@ -106,60 +116,34 @@ def group_rows(words: list[Word]) -> list[Row]:
     return rows
 
 
-@dataclass
-class Entry:
-    number: int
-    term_lines: list[str]
-    def_lines: list[str]
-
-
 def collect_entries(rows: list[Row]) -> list[Entry]:
+    num_re = re.compile(r"^(\d+)\.$")
     entries: list[Entry] = []
     current: Entry | None = None
-
-    num_re = re.compile(r"^(\d+)\.$")
-
     for row in rows:
         if _is_header_row(row):
             continue
-        # Identify a "number word" in this row: the leftmost word matching N.
         words = sorted(row.words, key=lambda w: w.x_min)
-        num: int | None = None
-        consumed_idxs: set[int] = set()
+        consumed = 0
         if words:
             m = num_re.match(words[0].text)
             if m:
                 num = int(m.group(1))
-                consumed_idxs.add(0)
-            else:
-                # 3-digit and some 2-digit entries: number is glued to first
-                # term word, e.g. "100." actually arrives as "100." here too,
-                # but in some pages the first word is "100." with the term
-                # starting in the second word. The standalone-"\d+\." form
-                # already handled above.
-                pass
-        if num is not None:
-            current = Entry(number=num, term_lines=[], def_lines=[])
-            entries.append(current)
+                current = Entry(number=num, page=row.page, y_min=row.y_min)
+                entries.append(current)
+                consumed = 1
         if current is None:
             continue
-
-        term_words = [
-            w
-            for i, w in enumerate(words)
-            if i not in consumed_idxs and w.x_min < DEF_COLUMN_X
-        ]
+        term_words = [w for w in words[consumed:] if w.x_min < DEF_COLUMN_X]
         def_words = [w for w in words if w.x_min >= DEF_COLUMN_X]
         if term_words:
             current.term_lines.append(" ".join(w.text for w in term_words))
         if def_words:
             current.def_lines.append(" ".join(w.text for w in def_words))
-
     return entries
 
 
 def join_hyphenated(lines: list[str]) -> str:
-    """Join lines whose previous line ends with a hyphen."""
     out: list[str] = []
     pending = ""
     for line in lines:
@@ -176,14 +160,96 @@ def join_hyphenated(lines: list[str]) -> str:
 
 def normalize_term(lines: list[str]) -> str:
     joined = join_hyphenated(lines)
-    parts = [p.strip() for p in joined.splitlines() if p.strip()]
-    return " ".join(parts)
+    return " ".join(p.strip() for p in joined.splitlines() if p.strip())
 
 
 def normalize_definition(lines: list[str]) -> str:
     joined = join_hyphenated(lines)
-    parts = [p.strip() for p in joined.splitlines() if p.strip()]
-    return "\n".join(parts)
+    return "\n".join(p.strip() for p in joined.splitlines() if p.strip())
+
+
+@dataclass
+class ImagePlacement:
+    page: int
+    xref: int
+    y_min: float
+    y_max: float
+    file_name: str
+
+
+def extract_images(pdf_path: str) -> list[ImagePlacement]:
+    """Extract every non-watermark image to IMAGE_OUT_DIR (deduped by xref) and
+    return one ImagePlacement per visual occurrence."""
+    os.makedirs(IMAGE_OUT_DIR, exist_ok=True)
+    doc = pymupdf.open(pdf_path)
+    saved_files: dict[int, str] = {}
+    placements: list[ImagePlacement] = []
+
+    for page_idx, page in enumerate(doc, start=1):
+        for img in page.get_images(full=True):
+            xref = img[0]
+            for rect in page.get_image_rects(xref):
+                # Skip the corner watermark logo.
+                if rect.width < WATERMARK_MAX_DIM and rect.height < WATERMARK_MAX_DIM:
+                    continue
+                if xref not in saved_files:
+                    blob = doc.extract_image(xref)
+                    ext = blob["ext"] or "png"
+                    file_name = f"img-{xref}.{ext}"
+                    path = os.path.join(IMAGE_OUT_DIR, file_name)
+                    with open(path, "wb") as f:
+                        f.write(blob["image"])
+                    saved_files[xref] = file_name
+                placements.append(
+                    ImagePlacement(
+                        page=page_idx,
+                        xref=xref,
+                        y_min=float(rect.y0),
+                        y_max=float(rect.y1),
+                        file_name=saved_files[xref],
+                    )
+                )
+    return placements
+
+
+def attach_images(entries: list[Entry], placements: list[ImagePlacement]) -> None:
+    """Mutate entries in place to set image_url based on bbox proximity.
+
+    Rule: an image belongs to the entry with the largest y_min that is still
+    <= the image's y_min on the same page. If no such entry exists on that
+    page, the image belongs to the last entry from any earlier page.
+    """
+    entries_by_page: dict[int, list[Entry]] = {}
+    for e in entries:
+        entries_by_page.setdefault(e.page, []).append(e)
+    for page_entries in entries_by_page.values():
+        page_entries.sort(key=lambda e: e.y_min)
+
+    sorted_entries = sorted(entries, key=lambda e: (e.page, e.y_min))
+
+    def find_entry(p: ImagePlacement) -> Entry | None:
+        page_entries = entries_by_page.get(p.page, [])
+        candidate = None
+        for e in page_entries:
+            if e.y_min <= p.y_min:
+                candidate = e
+            else:
+                break
+        if candidate is not None:
+            return candidate
+        # Spillover: latest entry that started before this page.
+        previous = [e for e in sorted_entries if e.page < p.page]
+        return previous[-1] if previous else None
+
+    for placement in sorted(placements, key=lambda p: (p.page, p.y_min)):
+        entry = find_entry(placement)
+        if entry is None:
+            continue
+        # Each entry only gets one image. The first match (top-down in page
+        # order) wins, which matches the visual: the image immediately under
+        # the entry's text is its illustration.
+        if entry.image_url is None:
+            entry.image_url = f"{IMAGE_URL_PREFIX}/{placement.file_name}"
 
 
 def slugify(s: str) -> str:
@@ -192,18 +258,27 @@ def slugify(s: str) -> str:
     return s.strip("-") or "card"
 
 
-def render_typescript(cards: list[tuple[int, str, str]]) -> str:
+def render_typescript(cards: list[Entry]) -> str:
     seen_ids: set[str] = set()
-    items: list[dict[str, str]] = []
-    for num, term, definition in cards:
-        base_id = slugify(term)[:60] or f"card-{num}"
+    items: list[dict] = []
+    for entry in cards:
+        term = normalize_term(entry.term_lines)
+        definition = normalize_definition(entry.def_lines)
+        base_id = slugify(term)[:60] or f"card-{entry.number}"
         cid = base_id
         suffix = 2
         while cid in seen_ids:
             cid = f"{base_id}-{suffix}"
             suffix += 1
         seen_ids.add(cid)
-        items.append({"id": cid, "front": term, "back": definition})
+        items.append(
+            {
+                "id": cid,
+                "front": term,
+                "back": definition,
+                "image": entry.image_url,
+            }
+        )
 
     lines: list[str] = [
         "// Generated by scripts/parse-pdf.py from public/study-materials/pig-dissection.pdf.",
@@ -213,6 +288,7 @@ def render_typescript(cards: list[tuple[int, str, str]]) -> str:
         "  id: string;",
         "  front: string;",
         "  back: string;",
+        "  image?: string;",
         "  hint?: string;",
         "};",
         "",
@@ -234,6 +310,8 @@ def render_typescript(cards: list[tuple[int, str, str]]) -> str:
         lines.append(f"      id: {json.dumps(item['id'])},")
         lines.append(f"      front: {json.dumps(item['front'])},")
         lines.append(f"      back: {json.dumps(item['back'])},")
+        if item["image"]:
+            lines.append(f"      image: {json.dumps(item['image'])},")
         lines.append("    },")
     lines.append("  ],")
     lines.append("};")
@@ -244,27 +322,27 @@ def render_typescript(cards: list[tuple[int, str, str]]) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <bbox-xhtml> <output.ts>", file=sys.stderr)
+    if len(sys.argv) < 4:
+        print(
+            f"Usage: {sys.argv[0]} <bbox-xhtml> <pdf-path> <output.ts>",
+            file=sys.stderr,
+        )
         sys.exit(2)
-    src, dst = sys.argv[1], sys.argv[2]
+    xhtml_path, pdf_path, dst = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    words = collect_words(src)
+    words = collect_words(xhtml_path)
     rows = group_rows(words)
     entries = collect_entries(rows)
+    entries.sort(key=lambda e: e.number)
 
-    cards: list[tuple[int, str, str]] = []
-    for e in entries:
-        term = normalize_term(e.term_lines)
-        definition = normalize_definition(e.def_lines)
-        cards.append((e.number, term, definition))
-    cards.sort(key=lambda c: c[0])
+    placements = extract_images(pdf_path)
+    attach_images(entries, placements)
 
     expected = 200
-    nums = sorted(c[0] for c in cards)
-    if len(cards) != expected:
+    nums = [e.number for e in entries]
+    if len(entries) != expected:
         print(
-            f"Warning: parsed {len(cards)} cards, expected {expected}",
+            f"Warning: parsed {len(entries)} cards, expected {expected}",
             file=sys.stderr,
         )
     missing = [i for i in range(1, expected + 1) if i not in nums]
@@ -273,14 +351,20 @@ def main() -> None:
     duplicates = sorted({n for n in nums if nums.count(n) > 1})
     if duplicates:
         print(f"Duplicate card numbers: {duplicates}", file=sys.stderr)
-    empties = [n for n, t, d in cards if not t or not d]
+    empties = [
+        e.number for e in entries if not e.term_lines or not e.def_lines
+    ]
     if empties:
         print(f"Cards with empty term or definition: {empties}", file=sys.stderr)
+    with_image = sum(1 for e in entries if e.image_url)
+    print(
+        f"Wrote {len(entries)} cards ({with_image} with images) to {dst}",
+        file=sys.stderr,
+    )
 
-    ts = render_typescript(cards)
+    ts = render_typescript(entries)
     with open(dst, "w") as f:
         f.write(ts)
-    print(f"Wrote {len(cards)} cards to {dst}")
 
 
 if __name__ == "__main__":
