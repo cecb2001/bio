@@ -21,6 +21,7 @@ export function GroupEditor({ mode }: { mode: Mode }) {
     () => new Set(initial?.cardIds ?? []),
   );
   const [query, setQuery] = useState("");
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
 
   const filteredCards = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -32,13 +33,37 @@ export function GroupEditor({ mode }: { mode: Mode }) {
     );
   }, [query]);
 
-  function toggle(id: string) {
+  function handleRowClick(cardId: string, shiftKey: boolean) {
+    const wasSelected = selected.has(cardId);
+    const targetState = !wasSelected;
+
+    if (shiftKey && lastClickedId && lastClickedId !== cardId) {
+      const ids = filteredCards.map((c) => c.id);
+      const fromIdx = ids.indexOf(lastClickedId);
+      const toIdx = ids.indexOf(cardId);
+      if (fromIdx !== -1 && toIdx !== -1) {
+        const [a, b] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        const range = ids.slice(a, b + 1);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (const id of range) {
+            if (targetState) next.add(id);
+            else next.delete(id);
+          }
+          return next;
+        });
+        setLastClickedId(cardId);
+        return;
+      }
+    }
+
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (targetState) next.add(cardId);
+      else next.delete(cardId);
       return next;
     });
+    setLastClickedId(cardId);
   }
 
   function selectAllVisible() {
@@ -147,6 +172,9 @@ export function GroupEditor({ mode }: { mode: Mode }) {
           placeholder="Search cards…"
           className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm outline-none focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:focus:border-zinc-600"
         />
+        <p className="text-xs text-zinc-500">
+          Tip: shift-click to select a range.
+        </p>
         <ul className="max-h-[60vh] overflow-y-auto rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
           {filteredCards.length === 0 ? (
             <li className="p-6 text-center text-sm text-zinc-500">
@@ -160,11 +188,21 @@ export function GroupEditor({ mode }: { mode: Mode }) {
                   key={card.id}
                   className="border-b border-zinc-100 last:border-b-0 dark:border-zinc-800"
                 >
-                  <label className="flex cursor-pointer items-start gap-3 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                  <label
+                    className="flex cursor-pointer items-start gap-3 p-3 select-none hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleRowClick(card.id, e.shiftKey);
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={checked}
-                      onChange={() => toggle(card.id)}
+                      onChange={() => {
+                        /* handled by label onClick */
+                      }}
+                      tabIndex={-1}
+                      aria-label={`Select ${card.front}`}
                       className="mt-1 h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
                     />
                     <div className="min-w-0 flex-1">
